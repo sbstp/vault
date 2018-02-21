@@ -13,6 +13,32 @@ def printf(fmt, *args, **kwargs):
     sys.stdout.flush()
 
 
+def first_existing_parent(file):
+    cur_path = path.dirname(file)
+    while not path.exists(cur_path):
+        cur_path = path.dirname(cur_path)
+    return cur_path
+
+
+def makedirs(fullpath, uid, gid):
+    if not path.exists(fullpath):
+        parent, _ = path.split(fullpath)
+        makedirs(parent, uid, gid)
+        os.mkdir(fullpath)
+        os.chown(fullpath, uid, gid)
+
+
+def can_read(file):
+    return os.access(file, os.R_OK)
+
+
+def can_write(file):
+    if not path.exists(file):
+        parent = first_existing_parent(file)
+        return os.access(parent, os.W_OK)
+    return os.access(file, os.W_OK)
+
+
 class Registry:
 
     def __init__(self):
@@ -46,25 +72,27 @@ class Registry:
 
     def backup_to(self, backup_path):
         for item in self.paths:
-            if not os.access(item, os.R_OK):
+            if not can_read(item):
                 raise PermissionError(item)
 
         with tarfile.open(backup_path, "w:gz") as tar:
             for item in self.paths:
-                printf("Backing up {}\n", item)
+                printf("Backed up {}\n", item)
                 tar.add(item)
 
     def restore_from(self, backup_path):
         with tarfile.open(backup_path, "r:*") as tar:
             for mem in tar.getmembers():
-                abs_path = path.join("/", mem.name)
-                if not os.access(abs_path, os.W_OK):
-                    raise PermissionError(abs_path)
+                file = path.join("/", mem.name)
+                if not can_write(file):
+                    raise PermissionError(file)
 
             for mem in tar.getmembers():
-                abs_path = path.join("/", mem.name)
-                printf("Restoring {}\n", abs_path)
+                file = path.join("/", mem.name)
+                # create any missing directory with the file's owner and group
+                makedirs(path.dirname(file), mem.uid, mem.gid)
                 tar.extract(mem, "/")
+                printf("Restored {}\n", file)
 
 
 if __name__ == '__main__':
