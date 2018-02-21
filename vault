@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 
-import argparse
 import json
 import os
 import sys
 import tarfile
+from collections import OrderedDict
 from os import path
 
 
 def printf(fmt, *args, **kwargs):
-    sys.stdout.write(fmt.format(*args, **kwargs))
-    sys.stdout.flush()
+    print(fmt.format(*args, **kwargs), end='')
 
 
 def first_existing_parent(file):
@@ -95,60 +94,92 @@ class Registry:
                 printf("Restored {}\n", file)
 
 
+class Command:
+
+    def __init__(self, name, func, args_help="", help=""):
+        self.name = name
+        self.func = func
+        self.args_help = args_help
+        self.help = help
+
+
+class Commands:
+
+    def __init__(self):
+        self._commands = OrderedDict()
+
+    def add_command(self, name, func, args_help="", help=""):
+        self._commands[name] = Command(name, func, args_help, help)
+
+    def print_help(self, unknown=None):
+        if unknown is not None:
+            printf("Unknown command '{}'\n\n", unknown)
+        printf("Usage: vault <command>\n\n")
+        printf("Commands:\n")
+
+        max_cmd_len = max(len(cmd.name) for cmd in self._commands.values()) + 2
+        max_args_help_len = max(len(cmd.args_help) for cmd in self._commands.values()) + 2
+        for cmd in self._commands.values():
+            printf("  {}{}{}\n", cmd.name.ljust(max_cmd_len), cmd.args_help.ljust(max_args_help_len), cmd.help)
+
+    def dispatch(self, args):
+        if len(args) == 0:
+            self.print_help()
+            return
+        cmd_name = args[0]
+        rest = args[1:]
+
+        if cmd_name in ('-h', '--help', 'help'):
+            self.print_help()
+            return
+
+        cmd = self._commands.get(cmd_name, None)
+        if cmd is None:
+            self.print_help(unknown=cmd_name)
+        else:
+            try:
+                cmd.func(*rest)
+            except TypeError as err:
+                printf("Invalid argument for command '{}'\n", cmd_name)
+
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog="vault", usage="vault <command> [args]")
-    subparsers = parser.add_subparsers(metavar="<command>", dest="subcmd", help="Sub-command to run")
-
-    sub = subparsers.add_parser("add")
-    sub.add_argument('paths', type=str, nargs="+")
-
-    sub = subparsers.add_parser("rm")
-    sub.add_argument('paths', type=str, nargs="+")
-
-    sub = subparsers.add_parser("ls")
-
-    sub = subparsers.add_parser("backup")
-    sub.add_argument('path', type=str)
-
-    sub = subparsers.add_parser("restore")
-    sub.add_argument('path', type=str)
-
     reg = Registry()
-    args = parser.parse_args()
+    commands = Commands()
 
-    def subcmd_add():
-        for new_path in args.paths:
+    def cmd_add(*paths):
+        for new_path in paths:
             new_path = path.abspath(new_path)
             reg.add_path(new_path)
 
-    def subcmd_rm():
-        for rm_path in args.paths:
+    def cmd_rm(*paths):
+        for rm_path in paths:
             rm_path = path.abspath(rm_path)
             reg.rm_path(rm_path)
 
-    def subcmd_ls():
+    def cmd_ls():
         for item in reg.paths:
             printf("{}\n", item)
 
-    def subcmd_backup():
-        backup_path = path.abspath(args.path)
+    def cmd_backup(backup_path):
+        backup_path = path.abspath(backup_path)
         try:
             reg.backup_to(backup_path)
         except PermissionError as err:
             printf("Cannot read from {}, backup aborting.\n", err.args[0])
 
-    def subcmd_restore():
-        backup_path = path.abspath(args.path)
+    def cmd_restore(backup_path):
+        backup_path = path.abspath(backup_path)
         try:
             reg.restore_from(backup_path)
         except PermissionError as err:
             printf("Cannot write to {}, restore aborting.\n", err.args[0])
-            pass
 
-    dispatch = dict(add=subcmd_add, rm=subcmd_rm, ls=subcmd_ls, backup=subcmd_backup, restore=subcmd_restore)
-    func = dispatch.get(args.subcmd, None)
-    if func is not None:
-        func()
-        reg.save()
-    else:
-        parser.print_help()
+    commands.add_command("add", cmd_add, "<path> [<path>...]", "Add files to the index")
+    commands.add_command("rm", cmd_rm, "<path> [<path>...]", "Remove files from the index")
+    commands.add_command("ls", cmd_ls, "", "List files in the index")
+    commands.add_command("backup", cmd_backup, "<backup_path>", "Backup files in the index")
+    commands.add_command("restore", cmd_restore, "<backup_path>", "Restore files from the index")
+    commands.dispatch(sys.argv[1:])
+
+    reg.save()
