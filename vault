@@ -91,6 +91,7 @@ class Registry:
                 # create any missing directory with the file's owner and group
                 makedirs(path.dirname(file), mem.uid, mem.gid)
                 tar.extract(mem, "/")
+                self.add_path(file)
                 printf("Restored {}\n", file)
 
 
