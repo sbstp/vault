@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import sys
+import tarfile
+from os import path
+
+
+def printf(fmt, *args, **kwargs):
+    sys.stdout.write(fmt.format(*args, **kwargs))
+    sys.stdout.flush()
+
+
+class Registry:
+
+    def __init__(self):
+        self._vault_path = path.join(path.expanduser("~"), ".vault")
+        if path.exists(self._vault_path):
+            with open(self._vault_path) as f:
+                self.paths = json.load(f)
+        else:
+            self.paths = []
+
+    def add_path(self, new_path):
+        idx = 0
+        while idx < len(self.paths):
+            if new_path == self.paths[idx]:
+                return
+            if new_path < self.paths[idx]:
+                self.paths.insert(idx, new_path)
+                return
+            idx += 1
+        self.paths.append(new_path)
+
+    def rm_path(self, rm_path):
+        try:
+            self.paths.remove(rm_path)
+        except ValueError:
+            pass
+
+    def save(self):
+        with open(self._vault_path, 'w') as f:
+            json.dump(self.paths, f)
+
+    def backup_to(self, backup_path):
+        for item in self.paths:
+            if not os.access(item, os.R_OK):
+                raise PermissionError(item)
+
+        with tarfile.open(backup_path, "w:gz") as tar:
+            for item in self.paths:
+                tar.add(item)
+
+    def restore_from(self, backup_path):
+        with tarfile.open(backup_path, "r:*") as tar:
+            for mem in tar.getmembers():
+                abs_path = path.join("/", mem.name)
+                if not os.access(abs_path, os.W_OK):
+                    raise PermissionError(abs_path)
+
+            for mem in tar.getmembers():
+                tar.extract(mem, "/")
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(prog="vault")
+    subparsers = parser.add_subparsers(dest="subcmd")
+
+    sub = subparsers.add_parser("add")
+    sub.add_argument('paths', type=str, nargs="+")
+
+    sub = subparsers.add_parser("rm")
+    sub.add_argument('paths', type=str, nargs="+")
+
+    sub = subparsers.add_parser("ls")
+
+    sub = subparsers.add_parser("backup")
+    sub.add_argument('path', type=str)
+
+    sub = subparsers.add_parser("restore")
+    sub.add_argument('path', type=str)
+
+    reg = Registry()
+    args = parser.parse_args()
+
+    def subcmd_add():
+        for new_path in args.paths:
+            new_path = path.abspath(new_path)
+            reg.add_path(new_path)
+
+    def subcmd_rm():
+        for rm_path in args.paths:
+            rm_path = path.abspath(rm_path)
+            reg.rm_path(rm_path)
+
+    def subcmd_ls():
+        for item in reg.paths:
+            printf("{}\n", item)
+
+    def subcmd_backup():
+        backup_path = path.abspath(args.path)
+        try:
+            reg.backup_to(backup_path)
+        except PermissionError as err:
+            printf("Cannot read from {}, backup aborting.\n", err.args[0])
+
+    def subcmd_restore():
+        backup_path = path.abspath(args.path)
+        try:
+            reg.restore_from(backup_path)
+        except PermissionError as err:
+            printf("Cannot write to {}, restore aborting.\n", err.args[0])
+            pass
+
+    dispatch = dict(add=subcmd_add, rm=subcmd_rm, ls=subcmd_ls, backup=subcmd_backup, restore=subcmd_restore)
+    dispatch[args.subcmd]()
+    reg.save()
