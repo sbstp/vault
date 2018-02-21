@@ -51,6 +51,7 @@ class Registry:
 
         with tarfile.open(backup_path, "w:gz") as tar:
             for item in self.paths:
+                printf("Backing up {}\n", item)
                 tar.add(item)
 
     def restore_from(self, backup_path):
@@ -61,12 +62,14 @@ class Registry:
                     raise PermissionError(abs_path)
 
             for mem in tar.getmembers():
+                abs_path = path.join("/", mem.name)
+                printf("Restoring {}\n", abs_path)
                 tar.extract(mem, "/")
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog="vault")
-    subparsers = parser.add_subparsers(dest="subcmd")
+    parser = argparse.ArgumentParser(prog="vault", usage="vault <command> [args]")
+    subparsers = parser.add_subparsers(metavar="<command>", dest="subcmd", help="Sub-command to run")
 
     sub = subparsers.add_parser("add")
     sub.add_argument('paths', type=str, nargs="+")
@@ -115,5 +118,9 @@ if __name__ == '__main__':
             pass
 
     dispatch = dict(add=subcmd_add, rm=subcmd_rm, ls=subcmd_ls, backup=subcmd_backup, restore=subcmd_restore)
-    dispatch[args.subcmd]()
-    reg.save()
+    func = dispatch.get(args.subcmd, None)
+    if func is not None:
+        func()
+        reg.save()
+    else:
+        parser.print_help()
