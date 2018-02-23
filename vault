@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import inspect
 import json
 import os
 import sys
@@ -31,11 +32,15 @@ def can_read(file):
     return os.access(file, os.R_OK)
 
 
-def can_write(file):
-    if not path.exists(file):
+def can_write(file, mem):
+    if path.exists(file):
+        if mem.isdir():
+            return os.access(file, os.W_OK | os.X_OK)
+        else:
+            return os.access(file, os.W_OK)
+    else:
         parent = first_existing_parent(file)
-        return os.access(parent, os.W_OK)
-    return os.access(file, os.W_OK)
+        return os.access(parent, os.W_OK | os.X_OK)
 
 
 class Registry:
@@ -83,7 +88,7 @@ class Registry:
         with tarfile.open(backup_path, "r:*") as tar:
             for mem in tar.getmembers():
                 file = path.join("/", mem.name)
-                if not can_write(file):
+                if not can_write(file, mem):
                     raise PermissionError(file)
 
             for mem in tar.getmembers():
@@ -138,10 +143,11 @@ class Commands:
         if cmd is None:
             self.print_help(unknown=cmd_name)
         else:
-            try:
+            meta = inspect.getargspec(cmd.func)
+            if len(meta.args) != len(rest) and meta.varargs is None:
+                printf("Invalid argument(s) for command '{}'\n", cmd_name)
+            else:
                 cmd.func(*rest)
-            except TypeError as err:
-                printf("Invalid argument for command '{}'\n", cmd_name)
 
 
 if __name__ == '__main__':
