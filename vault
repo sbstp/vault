@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import getpass
 import inspect
 import json
 import os
@@ -10,7 +11,7 @@ from inspect import Parameter
 
 
 def printf(fmt, *args, **kwargs):
-    print(fmt.format(*args, **kwargs), end='')
+    sys.stdout.write(fmt.format(*args, **kwargs))
 
 
 def first_existing_parent(file):
@@ -45,8 +46,14 @@ def can_write(file, mem):
 
 class Registry:
 
-    def __init__(self):
-        self._vault_path = os.path.join(os.path.expanduser("~"), ".vault")
+    def __init__(self, user=None):
+        if user is None:
+            user = os.environ.get("SUDO_USER", None)
+            if user is None:
+                user = getpass.getuser()
+
+        self._vault_path = os.path.join(os.path.expanduser("~" + user), ".vault")
+
         if os.path.exists(self._vault_path):
             with open(self._vault_path) as f:
                 self.paths = json.load(f)
@@ -116,6 +123,7 @@ class Commands:
 
     def __init__(self):
         self._commands = OrderedDict()
+        self._options = OrderedDict()
 
     def add(self, name, func):
         help = inspect.getdoc(func)
@@ -139,16 +147,41 @@ class Commands:
 
         self._commands[name] = Command(name, func, help, arguments, options)
 
+    def option(self, name, help, arg_help=None):
+        self._options[name] = (help, arg_help)
+
+    def _print_aligned(self, rows, border=2):
+        cols = len(rows[0])
+        length = [0] * (cols)
+        for i in range(cols):
+            length[i] = max(len(row[i]) for row in rows) + border
+        for row in rows:
+            printf(" " * border)
+            for i in range(cols):
+                printf(row[i].ljust(length[i]))
+            printf("\n")
+
     def print_help(self, unknown=None):
         if unknown is not None:
             printf("Unknown command '{}'\n\n", unknown)
         printf("Usage: vault <command>\n\n")
         printf("Commands:\n")
 
-        max_cmd_len = max(len(cmd.name) for cmd in self._commands.values()) + 2
-        max_help_len = max(len(cmd.args_help) for cmd in self._commands.values()) + 2
-        for cmd in self._commands.values():
-            printf("  {}{}{}\n", cmd.name.ljust(max_cmd_len), cmd.args_help.ljust(max_help_len), cmd.short_help)
+        rows = [(c.name, c.args_help, c.short_help) for c in self._commands.values()]
+        self._print_aligned(rows)
+
+        if len(self._options) > 0:
+            printf("\nOptions:\n")
+            rows = []
+            for (opt, (help, arg_help)) in self._options.items():
+                if arg_help:
+                    left = "--{}={}".format(opt, arg_help)
+                else:
+                    left = "--{}".format(opt)
+
+                rows.append((left, help))
+            self._print_aligned(rows)
+            printf("\n")
 
     def _mk_cmd_help(self):
         def cmd_help(command=None):
@@ -165,15 +198,32 @@ class Commands:
                 printf("\n\n")
         return cmd_help
 
-    def dispatch(self, args):
+    def parse_args(self, args):
         self.add("help", self._mk_cmd_help())
 
-        if len(args) == 0:
+        arguments = []
+        options = {}
+
+        for arg in args:
+            if arg.startswith("--"):
+                idx = arg.find("=")
+                if idx == -1:
+                    options[arg[2:]] = True
+                else:
+                    options[arg[2:idx]] = arg[idx+1:]
+            else:
+                arguments.append(arg)
+
+        self.arguments = arguments
+        self.options = options
+
+    def dispatch(self):
+        if len(self.arguments) == 0:
             self.print_help()
             return
 
-        cmd_name = args[0]
-        rest = args[1:]
+        cmd_name = self.arguments[0]
+        rest = self.arguments[1:]
 
         cmd = self._commands.get(cmd_name, None)
         if cmd is None:
@@ -187,8 +237,10 @@ class Commands:
 
 
 if __name__ == '__main__':
-    reg = Registry()
     commands = Commands()
+    commands.parse_args(sys.argv[1:])
+
+    reg = Registry(commands.options.get("user", None))
 
     def cmd_add(*path):
         """
@@ -238,6 +290,7 @@ if __name__ == '__main__':
     commands.add("ls", cmd_ls)
     commands.add("backup", cmd_backup)
     commands.add("restore", cmd_restore)
-    commands.dispatch(sys.argv[1:])
+    commands.option("user", "Use this user's vault", "USERNAME")
+    commands.dispatch()
 
     reg.save()
