@@ -6,7 +6,7 @@ import os
 import sys
 import tarfile
 from collections import OrderedDict
-from os import path
+from inspect import Parameter
 
 
 def printf(fmt, *args, **kwargs):
@@ -14,15 +14,15 @@ def printf(fmt, *args, **kwargs):
 
 
 def first_existing_parent(file):
-    cur_path = path.dirname(file)
-    while not path.exists(cur_path):
-        cur_path = path.dirname(cur_path)
+    cur_path = os.path.dirname(file)
+    while not os.path.exists(cur_path):
+        cur_path = os.path.dirname(cur_path)
     return cur_path
 
 
 def makedirs(fullpath, uid, gid):
-    if not path.exists(fullpath):
-        parent, _ = path.split(fullpath)
+    if not os.path.exists(fullpath):
+        parent, _ = os.path.split(fullpath)
         makedirs(parent, uid, gid)
         os.mkdir(fullpath)
         os.chown(fullpath, uid, gid)
@@ -33,7 +33,7 @@ def can_read(file):
 
 
 def can_write(file, mem):
-    if path.exists(file):
+    if os.path.exists(file):
         if mem.isdir():
             return os.access(file, os.W_OK | os.X_OK)
         else:
@@ -46,8 +46,8 @@ def can_write(file, mem):
 class Registry:
 
     def __init__(self):
-        self._vault_path = path.join(path.expanduser("~"), ".vault")
-        if path.exists(self._vault_path):
+        self._vault_path = os.path.join(os.path.expanduser("~"), ".vault")
+        if os.path.exists(self._vault_path):
             with open(self._vault_path) as f:
                 self.paths = json.load(f)
         else:
@@ -87,14 +87,14 @@ class Registry:
     def restore_from(self, backup_path):
         with tarfile.open(backup_path, "r:*") as tar:
             for mem in tar.getmembers():
-                file = path.join("/", mem.name)
+                file = os.path.join("/", mem.name)
                 if not can_write(file, mem):
                     raise PermissionError(file)
 
             for mem in tar.getmembers():
-                file = path.join("/", mem.name)
+                file = os.path.join("/", mem.name)
                 # create any missing directory with the file's owner and group
-                makedirs(path.dirname(file), mem.uid, mem.gid)
+                makedirs(os.path.dirname(file), mem.uid, mem.gid)
                 tar.extract(mem, "/")
                 self.add_path(file)
                 printf("Restored {}\n", file)
@@ -102,11 +102,14 @@ class Registry:
 
 class Command:
 
-    def __init__(self, name, func, args_help="", help=""):
+    def __init__(self, name, func, help, arguments, options):
         self.name = name
         self.func = func
-        self.args_help = args_help
+        self.short_help = help.splitlines()[0]
         self.help = help
+        self.arguments = arguments
+        self.options = options
+        self.args_help = " ".join(arguments)
 
 
 class Commands:
@@ -114,8 +117,27 @@ class Commands:
     def __init__(self):
         self._commands = OrderedDict()
 
-    def add_command(self, name, func, args_help="", help=""):
-        self._commands[name] = Command(name, func, args_help, help)
+    def add(self, name, func):
+        help = inspect.getdoc(func)
+        spec = inspect.signature(func)
+        arguments = []
+        options = []
+
+        for param in spec.parameters.values():
+            if param.kind == Parameter.POSITIONAL_OR_KEYWORD:
+                if param.default is None:
+                    arguments.append("[<{}>]".format(param.name))
+                else:
+                    arguments.append("<{}>".format(param.name))
+            elif param.kind == Parameter.VAR_POSITIONAL:
+                arguments.append("<{}> [<{}> ...]".format(param.name, param.name))
+            elif param.kind == Parameter.KEYWORD_ONLY:
+                if param.default != Parameter.empty:
+                    options.append("--{}={}".format(param.name, param.default))
+                else:
+                    options.append("--{}", param.name)
+
+        self._commands[name] = Command(name, func, help, arguments, options)
 
     def print_help(self, unknown=None):
         if unknown is not None:
@@ -124,20 +146,34 @@ class Commands:
         printf("Commands:\n")
 
         max_cmd_len = max(len(cmd.name) for cmd in self._commands.values()) + 2
-        max_args_help_len = max(len(cmd.args_help) for cmd in self._commands.values()) + 2
+        max_help_len = max(len(cmd.args_help) for cmd in self._commands.values()) + 2
         for cmd in self._commands.values():
-            printf("  {}{}{}\n", cmd.name.ljust(max_cmd_len), cmd.args_help.ljust(max_args_help_len), cmd.help)
+            printf("  {}{}{}\n", cmd.name.ljust(max_cmd_len), cmd.args_help.ljust(max_help_len), cmd.short_help)
+
+    def _mk_cmd_help(self):
+        def cmd_help(command=None):
+            """
+            Display help about a command.
+            """
+            try:
+                cmd = self._commands[command]
+            except KeyError:
+                self.print_help(unknown=command)
+            else:
+                printf("Usage: vault {} {}\n\n", cmd.name, cmd.args_help)
+                printf(cmd.help)
+                printf("\n\n")
+        return cmd_help
 
     def dispatch(self, args):
+        self.add("help", self._mk_cmd_help())
+
         if len(args) == 0:
             self.print_help()
             return
+
         cmd_name = args[0]
         rest = args[1:]
-
-        if cmd_name in ('-h', '--help', 'help'):
-            self.print_help()
-            return
 
         cmd = self._commands.get(cmd_name, None)
         if cmd is None:
@@ -154,39 +190,54 @@ if __name__ == '__main__':
     reg = Registry()
     commands = Commands()
 
-    def cmd_add(*paths):
-        for new_path in paths:
+    def cmd_add(*path):
+        """
+        Add files to the index.
+        """
+        for new_path in path:
             new_path = path.abspath(new_path)
             reg.add_path(new_path)
 
-    def cmd_rm(*paths):
-        for rm_path in paths:
+    def cmd_rm(*path):
+        """
+        List files in the index.
+        """
+        for rm_path in path:
             rm_path = path.abspath(rm_path)
             reg.rm_path(rm_path)
 
     def cmd_ls():
+        """
+        List files in the index.
+        """
         for item in reg.paths:
             printf("{}\n", item)
 
     def cmd_backup(backup_path):
-        backup_path = path.abspath(backup_path)
+        """
+        Backup files to an archive.
+        """
+        backup_path = os.path.abspath(backup_path)
         try:
             reg.backup_to(backup_path)
         except PermissionError as err:
             printf("Cannot read from {}, backup aborting.\n", err.args[0])
 
     def cmd_restore(backup_path):
-        backup_path = path.abspath(backup_path)
+        """
+        Restores files from an archive.
+        """
+        backup_path = os.path.abspath(backup_path)
         try:
             reg.restore_from(backup_path)
         except PermissionError as err:
             printf("Cannot write to {}, restore aborting.\n", err.args[0])
 
-    commands.add_command("add", cmd_add, "<path> [<path>...]", "Add files to the index")
-    commands.add_command("rm", cmd_rm, "<path> [<path>...]", "Remove files from the index")
-    commands.add_command("ls", cmd_ls, "", "List files in the index")
-    commands.add_command("backup", cmd_backup, "<backup_path>", "Backup files in the index")
-    commands.add_command("restore", cmd_restore, "<backup_path>", "Restore files from the index")
+    commands.add("add", cmd_add)
+    commands.add("rm", cmd_rm)
+    commands.add("ls", cmd_ls)
+    commands.add("backup", cmd_backup)
+    commands.add("restore", cmd_restore)
     commands.dispatch(sys.argv[1:])
 
     reg.save()
