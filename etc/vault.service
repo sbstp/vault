@@ -1,0 +1,9 @@
+[Unit]
+Description=Vault backup
+After=network-online.target
+
+[Service]
+Type=simple
+User=simon
+Group=simon
+ExecStart=/usr/local/bin/vault backup /home/simon/tank/backup/simon@smith.tar.gz

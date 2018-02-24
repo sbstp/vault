@@ -195,7 +195,7 @@ if __name__ == '__main__':
         Add files to the index.
         """
         for new_path in path:
-            new_path = path.abspath(new_path)
+            new_path = os.path.abspath(new_path)
             reg.add_path(new_path)
 
     def cmd_rm(*path):
@@ -203,7 +203,7 @@ if __name__ == '__main__':
         List files in the index.
         """
         for rm_path in path:
-            rm_path = path.abspath(rm_path)
+            rm_path = os.path.abspath(rm_path)
             reg.rm_path(rm_path)
 
     def cmd_ls():
