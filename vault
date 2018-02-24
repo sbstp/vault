@@ -199,8 +199,6 @@ class Commands:
         return cmd_help
 
     def parse_args(self, args):
-        self.add("help", self._mk_cmd_help())
-
         arguments = []
         options = {}
 
@@ -218,6 +216,9 @@ class Commands:
         self.options = options
 
     def dispatch(self):
+        if "help" not in self._commands:
+            self.add("help", self._mk_cmd_help())
+
         if len(self.arguments) == 0:
             self.print_help()
             return
@@ -252,7 +253,7 @@ if __name__ == '__main__':
 
     def cmd_rm(*path):
         """
-        List files in the index.
+        Remove files from the index.
         """
         for rm_path in path:
             rm_path = os.path.abspath(rm_path)
