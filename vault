@@ -247,11 +247,33 @@ class Commands:
         if cmd is None:
             self.print_help(unknown=cmd_name)
         else:
-            meta = inspect.getargspec(cmd.func)
-            if len(meta.args) != len(rest) and meta.varargs is None:
+            num_arg_req = 0
+            opts = {}  # options sent to the func
+            valid_opts = set(self._options.keys())  # valid options, global options + func options
+            spec = inspect.signature(cmd.func)
+
+            # analyze the function's parameters for argument/option information
+            for param in spec.parameters.values():
+                if param.kind == Parameter.VAR_POSITIONAL and param.default is not None:
+                    num_arg_req += 1
+                elif param.kind == Parameter.KEYWORD_ONLY:
+                    if param.name in self.options:
+                        valid_opts.add(param.name)
+                        opts[param.name] = self.options[param.name]
+
+            # find if any provided option is unknown
+            unknown_opts = set()
+            for opt_name in self.options.keys():
+                if opt_name not in valid_opts:
+                    unknown_opts.add(opt_name)
+
+            if len(unknown_opts) > 0:
+                for opt_name in unknown_opts:
+                    printf("Unknown option '--{}'.\n", opt_name)
+            elif len(rest) < num_arg_req:
                 printf("Invalid argument(s) for command '{}'\n", cmd_name)
             else:
-                cmd.func(*rest)
+                cmd.func(*rest, **opts)
 
 
 if __name__ == '__main__':
@@ -305,7 +327,7 @@ if __name__ == '__main__':
 
     def cmd_inspect(backup_path):
         """
-        List files and owner information for a backup.
+        List files, owner and mode information for an archive.
         """
         with tarfile.open(backup_path, "r:*") as tar:
             rows = []
