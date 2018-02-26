@@ -35,9 +35,9 @@ def can_read(file):
     return os.access(file, os.R_OK)
 
 
-def can_write(file, mem):
+def can_write(file, is_dir=False):
     if os.path.exists(file):
-        if mem.isdir():
+        if is_dir:
             return os.access(file, os.W_OK | os.X_OK)
         else:
             return os.access(file, os.W_OK)
@@ -123,7 +123,7 @@ class Registry:
         with tarfile.open(backup_path, "r:*") as tar:
             for mem in tar.getmembers():
                 file = os.path.join("/", mem.name)
-                if not can_write(file, mem):
+                if not can_write(file, mem.isdir()):
                     raise PermissionError(file)
 
             for mem in tar.getmembers():
@@ -318,12 +318,24 @@ if __name__ == '__main__':
                 rows.append((kind, unix_get_user(mem), unix_get_group(mem), '{:o}'.format(mem.mode), abs_path))
             print_table(rows, indent=0)
 
+    def cmd_extract(backup_path, target_dir):
+        """
+        Extract the contents of the archive to a directory.
+        """
+        target = os.path.abspath(target_dir)
+        if not can_write(target, True):
+            printf("Cannot write to {}, extract aborting.\n", target)
+        else:
+            with tarfile.open(backup_path, "r:*") as tar:
+                tar.extractall(path=target)
+
     commands.add("add", cmd_add)
     commands.add("rm", cmd_rm)
     commands.add("ls", cmd_ls)
     commands.add("backup", cmd_backup)
     commands.add("restore", cmd_restore)
     commands.add("inspect", cmd_inspect)
+    commands.add("extract", cmd_extract)
     commands.option("user", "Use this user's vault", "USERNAME")
     commands.dispatch()
 
