@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import getpass
+import grp
 import inspect
 import json
 import os
+import pwd
 import sys
 import tarfile
 from collections import OrderedDict
@@ -42,6 +44,32 @@ def can_write(file, mem):
     else:
         parent = first_existing_parent(file)
         return os.access(parent, os.W_OK | os.X_OK)
+
+
+def print_table(rows, *, border=2, indent=2):
+    cols = len(rows[0])
+    length = [0] * (cols)
+    for i in range(cols):
+        length[i] = max(len(row[i]) for row in rows) + border
+    for row in rows:
+        printf(" " * indent)
+        for i in range(cols):
+            printf(row[i].ljust(length[i]))
+        printf("\n")
+
+
+def unix_get_user(mem):
+    try:
+        return pwd.getpwuid(mem.uid).pw_name
+    except KeyError:
+        return str(mem.uid)
+
+
+def unix_get_group(mem):
+    try:
+        return grp.getgrgid(mem.gid).gr_name
+    except KeyError:
+        return str(mem.gid)
 
 
 class Registry:
@@ -150,17 +178,6 @@ class Commands:
     def option(self, name, help, arg_help=None):
         self._options[name] = (help, arg_help)
 
-    def _print_aligned(self, rows, border=2):
-        cols = len(rows[0])
-        length = [0] * (cols)
-        for i in range(cols):
-            length[i] = max(len(row[i]) for row in rows) + border
-        for row in rows:
-            printf(" " * border)
-            for i in range(cols):
-                printf(row[i].ljust(length[i]))
-            printf("\n")
-
     def print_help(self, unknown=None):
         if unknown is not None:
             printf("Unknown command '{}'\n\n", unknown)
@@ -168,7 +185,7 @@ class Commands:
         printf("Commands:\n")
 
         rows = [(c.name, c.args_help, c.short_help) for c in self._commands.values()]
-        self._print_aligned(rows)
+        print_table(rows)
 
         if len(self._options) > 0:
             printf("\nOptions:\n")
@@ -180,7 +197,7 @@ class Commands:
                     left = "--{}".format(opt)
 
                 rows.append((left, help))
-            self._print_aligned(rows)
+            print_table(rows)
             printf("\n")
 
     def _mk_cmd_help(self):
@@ -286,11 +303,27 @@ if __name__ == '__main__':
         except PermissionError as err:
             printf("Cannot write to {}, restore aborting.\n", err.args[0])
 
+    def cmd_inspect(backup_path):
+        """
+        List files and owner information for a backup.
+        """
+        with tarfile.open(backup_path, "r:*") as tar:
+            rows = []
+            rows.append(("Kind", "User", "Group", "Mode", "Path"))
+            for mem in tar.getmembers():
+                kind = 'f'
+                if mem.isdir():
+                    kind = 'd'
+                abs_path = os.path.join("/", mem.name)
+                rows.append((kind, unix_get_user(mem), unix_get_group(mem), '{:o}'.format(mem.mode), abs_path))
+            print_table(rows, indent=0)
+
     commands.add("add", cmd_add)
     commands.add("rm", cmd_rm)
     commands.add("ls", cmd_ls)
     commands.add("backup", cmd_backup)
     commands.add("restore", cmd_restore)
+    commands.add("inspect", cmd_inspect)
     commands.option("user", "Use this user's vault", "USERNAME")
     commands.dispatch()
 
