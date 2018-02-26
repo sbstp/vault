@@ -109,18 +109,18 @@ class Registry:
         with open(self._vault_path, 'w') as f:
             json.dump(self.paths, f)
 
-    def backup_to(self, backup_path):
+    def backup_to(self, archive):
         for item in self.paths:
             if not can_read(item):
                 raise PermissionError(item)
 
-        with tarfile.open(backup_path, "w:gz") as tar:
+        with tarfile.open(archive, "w:gz") as tar:
             for item in self.paths:
                 printf("Backed up {}\n", item)
                 tar.add(item)
 
-    def restore_from(self, backup_path):
-        with tarfile.open(backup_path, "r:*") as tar:
+    def restore_from(self, archive):
+        with tarfile.open(archive, "r:*") as tar:
             for mem in tar.getmembers():
                 file = os.path.join("/", mem.name)
                 if not can_write(file, mem.isdir()):
@@ -305,31 +305,31 @@ if __name__ == '__main__':
         for item in reg.paths:
             printf("{}\n", item)
 
-    def cmd_backup(backup_path):
+    def cmd_backup(archive):
         """
         Backup files to an archive.
         """
-        backup_path = os.path.abspath(backup_path)
+        archive = os.path.abspath(archive)
         try:
-            reg.backup_to(backup_path)
+            reg.backup_to(archive)
         except PermissionError as err:
             printf("Cannot read from {}, backup aborting.\n", err.args[0])
 
-    def cmd_restore(backup_path):
+    def cmd_restore(archive):
         """
         Restores files from an archive.
         """
-        backup_path = os.path.abspath(backup_path)
+        archive = os.path.abspath(archive)
         try:
-            reg.restore_from(backup_path)
+            reg.restore_from(archive)
         except PermissionError as err:
             printf("Cannot write to {}, restore aborting.\n", err.args[0])
 
-    def cmd_inspect(backup_path):
+    def cmd_inspect(archive):
         """
         List files, owner and mode information for an archive.
         """
-        with tarfile.open(backup_path, "r:*") as tar:
+        with tarfile.open(archive, "r:*") as tar:
             rows = []
             rows.append(("Kind", "User", "Group", "Mode", "Path"))
             for mem in tar.getmembers():
@@ -340,15 +340,15 @@ if __name__ == '__main__':
                 rows.append((kind, unix_get_user(mem), unix_get_group(mem), '{:o}'.format(mem.mode), abs_path))
             print_table(rows, indent=0)
 
-    def cmd_extract(backup_path, target_dir):
+    def cmd_extract(archive, dir):
         """
         Extract the contents of the archive to a directory.
         """
-        target = os.path.abspath(target_dir)
+        target = os.path.abspath(dir)
         if not can_write(target, True):
             printf("Cannot write to {}, extract aborting.\n", target)
         else:
-            with tarfile.open(backup_path, "r:*") as tar:
+            with tarfile.open(archive, "r:*") as tar:
                 tar.extractall(path=target)
 
     commands.add("add", cmd_add)
