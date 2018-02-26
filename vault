@@ -80,7 +80,7 @@ class Registry:
             if user is None:
                 user = getpass.getuser()
 
-        self._vault_path = os.path.join(os.path.expanduser("~" + user), ".vault")
+        self._vault_path = os.path.expanduser("~{}/.vault".format(user))
 
         if os.path.exists(self._vault_path):
             with open(self._vault_path) as f:

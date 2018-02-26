@@ -1,0 +1,4 @@
+#!/bin/bash
+set -xe
+rm /usr/local/bin/vault
+ln -s "$PWD/vault" /usr/local/bin/vault
