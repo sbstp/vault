@@ -333,9 +333,11 @@ if __name__ == '__main__':
             rows = []
             rows.append(("Kind", "User", "Group", "Mode", "Path"))
             for mem in tar.getmembers():
-                kind = 'f'
+                kind = '-'
                 if mem.isdir():
                     kind = 'd'
+                elif mem.issym():
+                    kind = 'l'
                 abs_path = os.path.join("/", mem.name)
                 rows.append((kind, unix_get_user(mem), unix_get_group(mem), '{:o}'.format(mem.mode), abs_path))
             print_table(rows, indent=0)
